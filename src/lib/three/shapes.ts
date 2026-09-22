@@ -1,81 +1,182 @@
 import * as THREE from "three";
-import type { ModuleShape } from "../qr/design";
+import type { Profile3D } from "../qr/design";
+import type { Outline } from "../qr/outline";
 
-function roundedRect(
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r: number,
-): THREE.Shape {
-  const s = new THREE.Shape();
-  const radius = Math.min(r, w / 2, h / 2);
-  s.moveTo(x + radius, y);
-  s.lineTo(x + w - radius, y);
-  s.quadraticCurveTo(x + w, y, x + w, y + radius);
-  s.lineTo(x + w, y + h - radius);
-  s.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
-  s.lineTo(x + radius, y + h);
-  s.quadraticCurveTo(x, y + h, x, y + h - radius);
-  s.lineTo(x, y + radius);
-  s.quadraticCurveTo(x, y, x + radius, y);
-  return s;
-}
-
-function ringPath(cx: number, cy: number, r: number): THREE.Path {
-  const p = new THREE.Path();
-  p.absarc(cx, cy, r, 0, Math.PI * 2, true);
-  return p;
-}
-
-/** A module is ~1% of the plate on screen, so corners need very few segments. */
-export const CURVE_SEGMENTS: Record<ModuleShape, number> = {
-  square: 1,
-  rounded: 4,
-  dot: 14,
-};
-
-export function extrudeSettings(shape: ModuleShape) {
-  return {
-    depth: 1,
-    bevelEnabled: false,
-    curveSegments: CURVE_SEGMENTS[shape],
-  };
-}
-
-/** Unit module: 1x1 footprint centred on origin, extruded from z=0 to z=1. */
-export function moduleGeometry(shape: ModuleShape): THREE.ExtrudeGeometry {
-  const settings = extrudeSettings(shape);
-  if (shape === "dot") {
-    const circle = new THREE.Shape();
-    circle.absarc(0, 0, 0.5, 0, Math.PI * 2, false);
-    return new THREE.ExtrudeGeometry(circle, settings);
-  }
-  const r = shape === "rounded" ? 0.28 : 0;
-  return new THREE.ExtrudeGeometry(
-    roundedRect(-0.5, -0.5, 1, 1, r),
-    settings,
-  );
-}
+const HALF_PI = Math.PI / 2;
 
 /**
- * The 7x7 finder as two solids (outer ring + centre), matching the SVG export
- * exactly so the 2D and 3D views read as the same object.
- * Local coords: 0..7 with origin at the finder's top-left module.
+ * Outline points in three.js space (y up), so they mirror the SVG renderer:
+ * a point at SVG local (dx, dy) is world local (dx, -dy).
  */
-export function finderShapes(shape: ModuleShape): THREE.Shape[] {
-  if (shape === "dot") {
-    const ring = new THREE.Shape();
-    ring.absarc(3.5, 3.5, 3.5, 0, Math.PI * 2, false);
-    ring.holes.push(ringPath(3.5, 3.5, 2.5));
-    const centre = new THREE.Shape();
-    centre.absarc(3.5, 3.5, 1.5, 0, Math.PI * 2, false);
-    return [ring, centre];
+export function outlinePoints(
+  o: Outline,
+  size: number,
+  segments: number,
+): THREE.Vector2[] {
+  if (o.kind === "circle") {
+    const r = o.r * size;
+    const n = Math.max(8, segments * 4);
+    return Array.from({ length: n }, (_, i) => {
+      const a = (i / n) * Math.PI * 2;
+      return new THREE.Vector2(Math.cos(a) * r, Math.sin(a) * r);
+    });
   }
-  const rounded = shape === "rounded";
-  const ring = roundedRect(0, 0, 7, 7, rounded ? 2.3 : 0);
-  const hole = roundedRect(1, 1, 5, 5, rounded ? 1.3 : 0);
-  ring.holes.push(new THREE.Path(hole.getPoints(32)));
-  const centre = roundedRect(2, 2, 3, 3, rounded ? 0.8 : 0);
-  return [ring, centre];
+  if (o.kind === "poly") {
+    return o.pts
+      .map(([x, y]) => new THREE.Vector2(x * size, -y * size))
+      .reverse();
+  }
+
+  const h = size / 2;
+  const [tl, tr, br, bl] = o.radii.map((r) => Math.min(r, 0.5) * size);
+  const pts: THREE.Vector2[] = [];
+  const corner = (cx: number, cy: number, r: number, from: number) => {
+    if (r <= 0) {
+      pts.push(new THREE.Vector2(cx, cy));
+      return;
+    }
+    for (let i = 0; i <= segments; i++) {
+      const a = from + (i / segments) * HALF_PI;
+      pts.push(new THREE.Vector2(cx + Math.cos(a) * r, cy + Math.sin(a) * r));
+    }
+  };
+
+  // Counter-clockwise from the bottom-right corner.
+  corner(h - br, -h + br, br, -HALF_PI);
+  corner(h - tr, h - tr, tr, 0);
+  corner(-h + tl, h - tl, tl, HALF_PI);
+  corner(-h + bl, -h + bl, bl, Math.PI);
+  return pts;
+}
+
+export function outlineToShape(
+  o: Outline,
+  size: number,
+  segments: number,
+): THREE.Shape {
+  return new THREE.Shape(outlinePoints(o, size, segments));
+}
+
+/** [height fraction, footprint scale] samples from base to tip. */
+export type Profile = Array<[number, number]>;
+
+function dome(steps = 7): Profile {
+  return Array.from({ length: steps + 1 }, (_, i) => {
+    const t = (i / steps) * HALF_PI;
+    return [Math.sin(t), Math.cos(t)] as [number, number];
+  });
+}
+
+export const PROFILES: Record<Profile3D, Profile> = {
+  prism: [
+    [0, 1],
+    [1, 1],
+  ],
+  bevel: [
+    [0, 1],
+    [0.72, 1],
+    [1, 0.62],
+  ],
+  frustum: [
+    [0, 1],
+    [1, 0.45],
+  ],
+  pyramid: [
+    [0, 1],
+    [1, 0],
+  ],
+  dome: dome(),
+  ziggurat: [
+    [0, 1],
+    [0.34, 1],
+    [0.34, 0.72],
+    [0.67, 0.72],
+    [0.67, 0.44],
+    [1, 0.44],
+  ],
+};
+
+export const PROFILE_SEGMENTS: Record<string, number> = {
+  square: 1,
+  rounded: 3,
+  dot: 5,
+  diamond: 1,
+  leaf: 4,
+  classy: 4,
+  circle: 5,
+};
+
+/**
+ * Lofts a 2D outline along a vertical profile: one base footprint, scaled at
+ * each profile step, walled together. Unit footprint, z from 0 to 1.
+ */
+export function profiledGeometry(
+  outline: Outline,
+  profile: Profile,
+  segments: number,
+): THREE.BufferGeometry {
+  const pts = outlinePoints(outline, 1, segments);
+  const n = pts.length;
+  const faces = THREE.ShapeUtils.triangulateShape(pts, []);
+  const verts: number[] = [];
+
+  const push = (p: THREE.Vector2, scale: number, z: number) =>
+    verts.push(p.x * scale, p.y * scale, z);
+
+  for (let s = 0; s < profile.length - 1; s++) {
+    const [z0, k0] = profile[s];
+    const [z1, k1] = profile[s + 1];
+    if (k0 === k1 && z0 === z1) continue;
+    for (let i = 0; i < n; i++) {
+      const a = pts[i];
+      const b = pts[(i + 1) % n];
+      if (k1 === 0) {
+        push(a, k0, z0);
+        push(b, k0, z0);
+        verts.push(0, 0, z1);
+      } else if (k0 === 0) {
+        verts.push(0, 0, z0);
+        push(b, k1, z1);
+        push(a, k1, z1);
+      } else {
+        push(a, k0, z0);
+        push(b, k0, z0);
+        push(b, k1, z1);
+        push(a, k0, z0);
+        push(b, k1, z1);
+        push(a, k1, z1);
+      }
+    }
+  }
+
+  const cap = (scale: number, z: number, up: boolean) => {
+    for (const f of faces) {
+      const tri = up ? f : [f[2], f[1], f[0]];
+      for (const idx of tri) push(pts[idx], scale, z);
+    }
+  };
+  cap(profile[0][1], profile[0][0], false);
+  const top = profile[profile.length - 1];
+  if (top[1] > 0) cap(top[1], top[0], true);
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/** The 7x7 finder ring stays a straight prism: a tapered ring reads as a defect. */
+export function frameGeometry(
+  outer: Outline,
+  inner: Outline,
+  segments: number,
+): THREE.ExtrudeGeometry {
+  const shape = outlineToShape(outer, 7, segments);
+  const hole = new THREE.Path(outlinePoints(inner, 5, segments).reverse());
+  shape.holes.push(hole);
+  return new THREE.ExtrudeGeometry(shape, {
+    depth: 1,
+    bevelEnabled: false,
+    curveSegments: segments,
+  });
 }

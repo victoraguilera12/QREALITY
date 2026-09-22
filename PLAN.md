@@ -12,19 +12,49 @@ Crear una web app donde cualquier usuario pueda:
 
 ## Estado actual (MVP construido)
 
-Implementado y verificado en navegador:
+Editor en vivo (sin botón "generar"), con el panel organizado en secciones plegables
+al estilo de QRCode Monkey: **Contenido · Colores · Logo · Diseño · Modelo 3D**.
 
-- Editor en vivo: link → QR, sin botón "generar".
-- Personalización: paleta (6 presets + colores libres), forma de módulo (cuadrado / redondeado / punto), nivel ECC.
-- **Transición 2D→3D continua**: la vista 2D *es* la escena 3D vista desde arriba con los módulos a altura cero. Al pulsar 3D, una sola interpolación de 1.1s sube los módulos con stagger desde el centro y hace orbitar la cámara. Respeta `prefers-reduced-motion`.
-- Órbita con arrastre y deriva lenta en reposo.
-- Exportación: SVG y PNG en 2D, STL binario en milímetros en 3D.
-- Validación de contraste en vivo para escaneabilidad.
-- Sistema de diseño derivado de la skill UI/UX Pro Max → `design-system/qr-studio/MASTER.md`.
+**Formas.** Cuerpo (cuadrado, redondo, punto, rombo, hoja, classy), marco del ojo
+(cuadrado, redondo, classy, hoja) y pupila (cuadrado, redondo, círculo, classy).
+Una sola definición en `src/lib/qr/outline.ts` alimenta el SVG y la geometría 3D,
+así las dos vistas no pueden divergir.
 
-Verificado: los QR generados decodifican correctamente con jsQR en las 3 formas × niveles ECC L/H; la zona de datos coincide módulo a módulo con la matriz de referencia (las diferencias se limitan a los finders estilizados).
+**Colores.** Sólido o degradado (lineal con ángulo, o radial), fondo, y color propio
+opcional para marco y pupila. En 3D el degradado se aplica por instancia.
 
-Pendiente de las fases siguientes: logo central, degradados, tipos de contenido (WiFi/vCard), marcos con texto, GLB/OBJ, y todo lo de la Fase 3.
+**Logo.** Subida de PNG/JPG/WebP (máx. 1.5 MB), tamaño ajustable, despeje opcional de
+los módulos de debajo, y subida automática a ECC H. Se renderiza en el SVG y como
+plano texturizado en la escena 3D.
+
+**Modelo 3D.** Seis perfiles de extrusión — prisma, bisel, tronco, pirámide, cúpula,
+zigurat — generados por un lofting genérico sobre el mismo contorno 2D. Relieve,
+grosor de placa y tamaño de impresión ajustables.
+
+**Transición 2D→3D.** La vista 2D *es* la escena 3D vista desde arriba con los módulos
+a altura cero. Al pulsar 3D, una sola interpolación de 1.1s los sube con stagger desde
+el centro mientras la cámara orbita. Respeta `prefers-reduced-motion`.
+
+**Exportación.** SVG y PNG en 2D; STL binario en milímetros reales en 3D (el logo es
+textura, no va en la malla).
+
+### Verificación de escaneabilidad
+
+La app decodifica su propia salida con jsQR y avisa si el código no se lee. Dos cosas
+que costó descubrir y conviene no volver a romper:
+
+- **La fiabilidad de jsQR no es monótona con la resolución** (su binarizador trabaja en
+  bloques de 8×8 px): 12 px/módulo lee, 14 falla. El verificador prueba varias escalas
+  y acepta la primera que lee.
+- **`willReadFrequently: true` cambia el backend de rasterizado** y difumina las formas
+  finas lo bastante como para fallar códigos que sí escanean. No usarlo aquí.
+
+Formas y valores calibrados contra el decodificador: el rombo necesita alcanzar 0.62
+(a 0.5 no lee), el marco de ojo circular no lee a ningún radio y la pupila en rombo
+tampoco, por eso no se ofrecen. Las 96 combinaciones de formas que sí se ofrecen
+decodifican, igual que los degradados y el logo hasta 32% con ECC H.
+
+Pendiente: tipos de contenido (WiFi/vCard), marcos con texto, GLB/OBJ, y la Fase 3.
 
 ---
 

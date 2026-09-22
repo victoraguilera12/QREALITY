@@ -1,107 +1,146 @@
-import { useDeferredValue, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import Viewport, { type ViewportHandle } from "./Viewport";
 import {
   DEFAULT_DESIGN,
   PRESETS,
   QUIET_ZONE,
-  type ModuleShape,
+  eyeBallColorOf,
+  eyeFrameColorOf,
   type QrDesign,
 } from "../../lib/qr/design";
 import { createMatrix, type EccLevel, type QrMatrix } from "../../lib/qr/matrix";
 import { renderSvg } from "../../lib/qr/renderSvg";
 import { scannability } from "../../lib/qr/contrast";
+import { verifyScannable } from "../../lib/qr/verify";
 import {
   downloadPng,
   downloadStl,
   downloadSvg,
 } from "../../lib/export/download";
 import {
+  BALL_OPTIONS,
+  BODY_OPTIONS,
+  FRAME_OPTIONS,
+  OptionGrid,
+  PROFILE_OPTIONS,
+} from "./pickers";
+import {
   AlertIcon,
   CheckIcon,
+  ChevronIcon,
   CubeIcon,
   DownloadIcon,
+  ImageIcon,
   LinkIcon,
   OrbitIcon,
   SquareIcon,
+  TrashIcon,
 } from "./icons";
 
-const SHAPES: Array<{ id: ModuleShape; label: string }> = [
-  { id: "square", label: "Cuadrado" },
-  { id: "rounded", label: "Redondeado" },
-  { id: "dot", label: "Punto" },
+type SectionId = "content" | "colors" | "logo" | "design" | "model";
+
+const ECC: Array<{ id: EccLevel; label: string }> = [
+  { id: "L", label: "L" },
+  { id: "M", label: "M" },
+  { id: "Q", label: "Q" },
+  { id: "H", label: "H" },
 ];
 
-const ECC: Array<{ id: EccLevel; label: string; hint: string }> = [
-  { id: "L", label: "L", hint: "7% de recuperación" },
-  { id: "M", label: "M", hint: "15% de recuperación" },
-  { id: "Q", label: "Q", hint: "25% de recuperación" },
-  { id: "H", label: "H", hint: "30% de recuperación" },
-];
+const ECC_HINT: Record<EccLevel, string> = {
+  L: "7% de recuperación",
+  M: "15% de recuperación",
+  Q: "25% de recuperación",
+  H: "30% de recuperación",
+};
 
-function Field({
-  label,
-  children,
+const LOGO_TYPES = ["image/png", "image/jpeg", "image/webp"];
+const LOGO_MAX_BYTES = 1_500_000;
+
+function Section({
+  id,
+  title,
   hint,
+  open,
+  onToggle,
+  children,
 }: {
-  label: string;
-  children: React.ReactNode;
+  id: SectionId;
+  title: string;
   hint?: string;
+  open: SectionId | null;
+  onToggle: (id: SectionId) => void;
+  children: React.ReactNode;
 }) {
+  const isOpen = open === id;
   return (
-    <div className="space-y-2">
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="font-mono text-xs tracking-wide text-muted-foreground uppercase">
-          {label}
+    <div className="border-b border-border last:border-b-0">
+      <button
+        type="button"
+        onClick={() => onToggle(id)}
+        aria-expanded={isOpen}
+        className="flex min-h-12 w-full cursor-pointer items-center justify-between gap-3 py-3 text-left"
+      >
+        <span className="font-mono text-xs tracking-wide text-foreground uppercase">
+          {title}
         </span>
-        {hint && (
-          <span className="font-mono text-xs text-muted-foreground/70">
-            {hint}
-          </span>
-        )}
+        <span className="flex items-center gap-2">
+          {hint && (
+            <span className="font-mono text-[11px] text-muted-foreground">
+              {hint}
+            </span>
+          )}
+          <ChevronIcon
+            className={`size-4 text-muted-foreground transition-transform duration-200 ${
+              isOpen ? "rotate-180" : ""
+            }`}
+          />
+        </span>
+      </button>
+      <div
+        className="grid transition-[grid-template-rows] duration-300 ease-out"
+        style={{ gridTemplateRows: isOpen ? "1fr" : "0fr" }}
+      >
+        <div className="overflow-hidden">
+          <div className="space-y-4 pb-4">{children}</div>
+        </div>
       </div>
-      {children}
     </div>
   );
 }
 
-function Segmented<T extends string>({
-  options,
+function Label({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="font-mono text-[11px] tracking-wide text-muted-foreground uppercase">
+      {children}
+    </span>
+  );
+}
+
+function ColorRow({
+  label,
   value,
   onChange,
-  label,
 }: {
-  options: Array<{ id: T; label: string }>;
-  value: T;
-  onChange: (v: T) => void;
   label: string;
+  value: string;
+  onChange: (v: string) => void;
 }) {
   return (
-    <div
-      role="radiogroup"
-      aria-label={label}
-      className="grid gap-1 rounded-lg border border-border bg-background p-1"
-      style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
-    >
-      {options.map((o) => {
-        const active = o.id === value;
-        return (
-          <button
-            key={o.id}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            onClick={() => onChange(o.id)}
-            className={`min-h-11 cursor-pointer rounded-md px-3 font-mono text-sm transition-colors duration-200 ${
-              active
-                ? "bg-accent text-on-accent"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
-            }`}
-          >
-            {o.label}
-          </button>
-        );
-      })}
-    </div>
+    <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-2">
+      <input
+        type="color"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        aria-label={label}
+        className="size-6 shrink-0 cursor-pointer rounded border-0 bg-transparent p-0"
+      />
+      <span className="truncate font-mono text-xs text-muted-foreground">
+        {label}
+      </span>
+      <span className="ml-auto font-mono text-[10px] text-muted-foreground/70 uppercase">
+        {value}
+      </span>
+    </label>
   );
 }
 
@@ -123,7 +162,14 @@ function Slider({
   onChange: (v: number) => void;
 }) {
   return (
-    <Field label={label} hint={`${value}${suffix}`}>
+    <div className="space-y-1.5">
+      <div className="flex items-baseline justify-between">
+        <Label>{label}</Label>
+        <span className="font-mono text-[11px] text-muted-foreground">
+          {value}
+          {suffix}
+        </span>
+      </div>
       <input
         type="range"
         min={min}
@@ -132,9 +178,41 @@ function Slider({
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
         aria-label={label}
-        className="h-11 w-full cursor-pointer accent-[#22c55e]"
+        className="h-9 w-full cursor-pointer accent-[#22c55e]"
       />
-    </Field>
+    </div>
+  );
+}
+
+function Toggle({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <label className="flex min-h-11 cursor-pointer items-center justify-between gap-3">
+      <Label>{label}</Label>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        onClick={() => onChange(!checked)}
+        className={`relative h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors duration-200 ${
+          checked ? "bg-accent" : "bg-muted"
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 size-5 rounded-full bg-foreground transition-[left] duration-200 ${
+            checked ? "left-[22px]" : "left-0.5"
+          }`}
+        />
+      </button>
+    </label>
   );
 }
 
@@ -142,8 +220,11 @@ export default function QrStudio() {
   const [design, setDesign] = useState<QrDesign>(DEFAULT_DESIGN);
   const [mode, setMode] = useState<"2d" | "3d">("2d");
   const [printMm, setPrintMm] = useState(60);
+  const [open, setOpen] = useState<SectionId | null>("content");
+  const [logoError, setLogoError] = useState<string | null>(null);
   const viewportRef = useRef<ViewportHandle>(null);
   const lastMatrix = useRef<QrMatrix | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const deferredText = useDeferredValue(design.text);
 
@@ -171,15 +252,92 @@ export default function QrStudio() {
   const is3d = mode === "3d";
   const span = matrix ? matrix.size + QUIET_ZONE * 2 : 0;
 
+  const [decoded, setDecoded] = useState<boolean | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  useEffect(() => {
+    const expected = deferredText.trim();
+    if (!svg || !expected) return;
+    let cancelled = false;
+    setChecking(true);
+    const timer = setTimeout(async () => {
+      const result = await verifyScannable(svg, expected, span);
+      if (cancelled) return;
+      setDecoded(result);
+      setChecking(false);
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [svg, span, deferredText]);
+
+  const status: {
+    level: "good" | "warn" | "bad" | "idle";
+    message: string;
+  } = checking
+    ? { level: "idle", message: "Verificando lectura…" }
+    : decoded === false
+      ? {
+          level: "bad",
+          message:
+            "No se pudo leer: reduce el logo o sube la corrección de errores",
+        }
+      : scan.level === "bad"
+        ? { level: "bad", message: scan.message }
+        : scan.level === "warn"
+          ? { level: "warn", message: scan.message }
+          : decoded === true
+            ? { level: "good", message: "Verificado: el código se lee bien" }
+            : { level: "warn", message: scan.message };
+  const customEyes =
+    design.eyeFrameColor !== null || design.eyeBallColor !== null;
+
+  const toggleSection = (id: SectionId) =>
+    setOpen((current) => (current === id ? null : id));
+
+  const switchMode = (next: "2d" | "3d") => {
+    setMode(next);
+    if (next === "3d") setOpen("model");
+  };
+
+  const onLogoFile = (file: File | undefined) => {
+    if (!file) return;
+    if (!LOGO_TYPES.includes(file.type)) {
+      setLogoError("Solo PNG, JPG o WebP");
+      return;
+    }
+    if (file.size > LOGO_MAX_BYTES) {
+      setLogoError("Máximo 1.5 MB");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setLogoError(null);
+      setDesign((d) => ({
+        ...d,
+        ecc: "H",
+        logo: { src: String(reader.result), size: 0.22, clearSpace: true },
+      }));
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleStl = () => {
     const geometry = viewportRef.current?.exportGeometry();
     if (geometry) downloadStl(geometry, span, printMm, "qr-studio.stl");
   };
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[380px_minmax(0,1fr)]">
-      <aside className="order-2 space-y-5 rounded-xl border border-border bg-card p-6 lg:order-1 lg:h-[640px] lg:overflow-y-auto">
-        <Field label="Destino" hint={matrix ? `v${(matrix.size - 17) / 4}` : ""}>
+    <div className="grid gap-6 lg:grid-cols-[400px_minmax(0,1fr)]">
+      <aside className="order-2 rounded-xl border border-border bg-card px-6 lg:order-1 lg:h-[640px] lg:overflow-y-auto">
+        <Section
+          id="content"
+          title="Contenido"
+          hint={matrix ? `v${(matrix.size - 17) / 4}` : undefined}
+          open={open}
+          onToggle={toggleSection}
+        >
           <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 transition-colors duration-200 focus-within:border-accent">
             <LinkIcon className="size-4 shrink-0 text-muted-foreground" />
             <input
@@ -201,20 +359,60 @@ export default function QrStudio() {
               Demasiado contenido para este nivel de corrección
             </p>
           )}
-        </Field>
+          <div className="space-y-1.5">
+            <div className="flex items-baseline justify-between">
+              <Label>Corrección de errores</Label>
+              <span className="font-mono text-[11px] text-muted-foreground">
+                {ECC_HINT[design.ecc]}
+              </span>
+            </div>
+            <div className="grid grid-cols-4 gap-1 rounded-lg border border-border bg-background p-1">
+              {ECC.map((e) => (
+                <button
+                  key={e.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={design.ecc === e.id}
+                  onClick={() => set("ecc", e.id)}
+                  className={`min-h-11 cursor-pointer rounded-md font-mono text-sm transition-colors duration-200 ${
+                    design.ecc === e.id
+                      ? "bg-accent text-on-accent"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  }`}
+                >
+                  {e.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </Section>
 
-        <Field label="Paleta">
+        <Section
+          id="colors"
+          title="Colores"
+          hint={design.colorMode === "gradient" ? "degradado" : "sólido"}
+          open={open}
+          onToggle={toggleSection}
+        >
           <div className="grid grid-cols-3 gap-2">
             {PRESETS.map((p) => {
-              const active = p.fg === design.fg && p.bg === design.bg;
+              const active =
+                p.fg === design.fg &&
+                p.bg === design.bg &&
+                design.colorMode === "single";
               return (
                 <button
                   key={p.name}
                   type="button"
-                  onClick={() =>
-                    setDesign((d) => ({ ...d, fg: p.fg, bg: p.bg }))
-                  }
                   aria-pressed={active}
+                  onClick={() =>
+                    setDesign((d) => ({
+                      ...d,
+                      fg: p.fg,
+                      bg: p.bg,
+                      colorMode: "single",
+                    }))
+                  }
                   className={`group flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border px-2 transition-colors duration-200 ${
                     active
                       ? "border-accent"
@@ -234,110 +432,311 @@ export default function QrStudio() {
               );
             })}
           </div>
-          <div className="grid grid-cols-2 gap-2 pt-1">
+
+          <div className="grid grid-cols-2 gap-1 rounded-lg border border-border bg-background p-1">
             {(
               [
-                ["fg", "Módulos"],
-                ["bg", "Placa"],
+                ["single", "Sólido"],
+                ["gradient", "Degradado"],
               ] as const
-            ).map(([key, label]) => (
-              <label
-                key={key}
-                className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-2"
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                role="radio"
+                aria-checked={design.colorMode === id}
+                onClick={() => set("colorMode", id)}
+                className={`min-h-11 cursor-pointer rounded-md font-mono text-sm transition-colors duration-200 ${
+                  design.colorMode === id
+                    ? "bg-accent text-on-accent"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                }`}
               >
-                <input
-                  type="color"
-                  value={design[key]}
-                  onChange={(e) => set(key, e.target.value)}
-                  className="size-6 cursor-pointer rounded border-0 bg-transparent p-0"
-                  aria-label={`Color de ${label.toLowerCase()}`}
-                />
-                <span className="font-mono text-xs text-muted-foreground">
-                  {label}
-                </span>
-              </label>
+                {label}
+              </button>
             ))}
           </div>
-        </Field>
 
-        <Field label="Forma del módulo">
-          <Segmented
-            options={SHAPES}
-            value={design.shape}
-            onChange={(v) => set("shape", v)}
-            label="Forma del módulo"
-          />
-        </Field>
-
-        <Field
-          label="Corrección de errores"
-          hint={ECC.find((e) => e.id === design.ecc)?.hint}
-        >
-          <Segmented
-            options={ECC}
-            value={design.ecc}
-            onChange={(v) => set("ecc", v)}
-            label="Nivel de corrección de errores"
-          />
-        </Field>
-
-        <div
-          className="grid transition-[grid-template-rows] duration-500 ease-out"
-          style={{ gridTemplateRows: is3d ? "1fr" : "0fr" }}
-        >
-          <div className="overflow-hidden">
-            <div className="space-y-5 border-t border-border pt-5">
-              <Slider
-                label="Relieve"
-                value={design.depth}
-                min={0.4}
-                max={4}
-                step={0.1}
-                suffix=" u"
-                onChange={(v) => set("depth", v)}
-              />
-              <Slider
-                label="Grosor de placa"
-                value={design.plate}
-                min={0.3}
-                max={3}
-                step={0.1}
-                suffix=" u"
-                onChange={(v) => set("plate", v)}
-              />
-              <Slider
-                label="Tamaño de impresión"
-                value={printMm}
-                min={30}
-                max={200}
-                step={5}
-                suffix=" mm"
-                onChange={setPrintMm}
-              />
-            </div>
+          <div className="space-y-2">
+            <ColorRow
+              label={design.colorMode === "gradient" ? "Desde" : "Módulos"}
+              value={design.fg}
+              onChange={(v) => set("fg", v)}
+            />
+            {design.colorMode === "gradient" && (
+              <>
+                <ColorRow
+                  label="Hasta"
+                  value={design.gradientTo}
+                  onChange={(v) => set("gradientTo", v)}
+                />
+                <div className="grid grid-cols-2 gap-1 rounded-lg border border-border bg-background p-1">
+                  {(
+                    [
+                      ["linear", "Lineal"],
+                      ["radial", "Radial"],
+                    ] as const
+                  ).map(([id, label]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      role="radio"
+                      aria-checked={design.gradientType === id}
+                      onClick={() => set("gradientType", id)}
+                      className={`min-h-11 cursor-pointer rounded-md font-mono text-xs transition-colors duration-200 ${
+                        design.gradientType === id
+                          ? "bg-accent text-on-accent"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {design.gradientType === "linear" && (
+                  <Slider
+                    label="Ángulo"
+                    value={design.gradientAngle}
+                    min={0}
+                    max={360}
+                    step={15}
+                    suffix="°"
+                    onChange={(v) => set("gradientAngle", v)}
+                  />
+                )}
+              </>
+            )}
+            <ColorRow
+              label="Fondo"
+              value={design.bg}
+              onChange={(v) => set("bg", v)}
+            />
           </div>
-        </div>
+
+          <div className="border-t border-border pt-2">
+            <Toggle
+              label="Color propio de ojos"
+              checked={customEyes}
+              onChange={(on) =>
+                setDesign((d) => ({
+                  ...d,
+                  eyeFrameColor: on ? eyeFrameColorOf(d) : null,
+                  eyeBallColor: on ? eyeBallColorOf(d) : null,
+                }))
+              }
+            />
+            {customEyes && (
+              <div className="space-y-2 pt-1">
+                <ColorRow
+                  label="Marco"
+                  value={eyeFrameColorOf(design)}
+                  onChange={(v) => set("eyeFrameColor", v)}
+                />
+                <ColorRow
+                  label="Pupila"
+                  value={eyeBallColorOf(design)}
+                  onChange={(v) => set("eyeBallColor", v)}
+                />
+              </div>
+            )}
+          </div>
+        </Section>
+
+        <Section
+          id="logo"
+          title="Logo"
+          hint={design.logo ? "activo" : undefined}
+          open={open}
+          onToggle={toggleSection}
+        >
+          <input
+            ref={fileRef}
+            type="file"
+            accept={LOGO_TYPES.join(",")}
+            className="hidden"
+            onChange={(e) => onLogoFile(e.target.files?.[0])}
+          />
+          {design.logo ? (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 rounded-lg border border-border bg-background p-2">
+                <img
+                  src={design.logo.src}
+                  alt="Logo seleccionado"
+                  className="size-12 shrink-0 rounded object-contain"
+                />
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  className="min-h-11 cursor-pointer font-mono text-xs text-muted-foreground transition-colors duration-200 hover:text-foreground"
+                >
+                  Cambiar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDesign((d) => ({ ...d, logo: null }))}
+                  aria-label="Quitar logo"
+                  className="ml-auto flex min-h-11 cursor-pointer items-center gap-1 px-2 font-mono text-xs text-muted-foreground transition-colors duration-200 hover:text-destructive"
+                >
+                  <TrashIcon className="size-4" />
+                </button>
+              </div>
+              <Slider
+                label="Tamaño"
+                value={Math.round(design.logo.size * 100)}
+                min={10}
+                max={32}
+                step={1}
+                suffix="%"
+                onChange={(v) =>
+                  setDesign((d) =>
+                    d.logo ? { ...d, logo: { ...d.logo, size: v / 100 } } : d,
+                  )
+                }
+              />
+              <Toggle
+                label="Despejar módulos detrás"
+                checked={design.logo.clearSpace}
+                onChange={(on) =>
+                  setDesign((d) =>
+                    d.logo ? { ...d, logo: { ...d.logo, clearSpace: on } } : d,
+                  )
+                }
+              />
+              <p className="font-mono text-[11px] leading-relaxed text-muted-foreground">
+                Con logo conviene el nivel H: recupera hasta un 30% del código
+                tapado.
+              </p>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className="flex w-full cursor-pointer flex-col items-center gap-2 rounded-lg border border-dashed border-border px-4 py-8 transition-colors duration-200 hover:border-accent hover:text-accent"
+            >
+              <ImageIcon className="size-6 text-muted-foreground" />
+              <span className="font-mono text-xs text-muted-foreground">
+                Sube tu logo o marca
+              </span>
+              <span className="font-mono text-[10px] text-muted-foreground/70">
+                PNG, JPG o WebP · máx. 1.5 MB
+              </span>
+            </button>
+          )}
+          {logoError && (
+            <p className="font-mono text-xs text-destructive">{logoError}</p>
+          )}
+        </Section>
+
+        <Section
+          id="design"
+          title="Diseño"
+          open={open}
+          onToggle={toggleSection}
+        >
+          <div className="space-y-2">
+            <Label>Cuerpo</Label>
+            <OptionGrid
+              options={BODY_OPTIONS}
+              value={design.body}
+              onChange={(v) => set("body", v)}
+              label="Forma del cuerpo"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Marco del ojo</Label>
+            <OptionGrid
+              options={FRAME_OPTIONS}
+              value={design.eyeFrame}
+              onChange={(v) => set("eyeFrame", v)}
+              label="Forma del marco del ojo"
+              columns={4}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Pupila del ojo</Label>
+            <OptionGrid
+              options={BALL_OPTIONS}
+              value={design.eyeBall}
+              onChange={(v) => set("eyeBall", v)}
+              label="Forma de la pupila del ojo"
+              columns={4}
+            />
+          </div>
+        </Section>
+
+        <Section
+          id="model"
+          title="Modelo 3D"
+          hint={PROFILE_OPTIONS.find((p) => p.id === design.profile)?.label}
+          open={open}
+          onToggle={toggleSection}
+        >
+          <div className="space-y-2">
+            <Label>Figura del módulo</Label>
+            <OptionGrid
+              options={PROFILE_OPTIONS}
+              value={design.profile}
+              onChange={(v) => set("profile", v)}
+              label="Figura 3D del módulo"
+            />
+          </div>
+          <Slider
+            label="Relieve"
+            value={design.depth}
+            min={0.4}
+            max={4}
+            step={0.1}
+            suffix=" u"
+            onChange={(v) => set("depth", v)}
+          />
+          <Slider
+            label="Grosor de placa"
+            value={design.plate}
+            min={0.3}
+            max={3}
+            step={0.1}
+            suffix=" u"
+            onChange={(v) => set("plate", v)}
+          />
+          <Slider
+            label="Tamaño de impresión"
+            value={printMm}
+            min={30}
+            max={200}
+            step={5}
+            suffix=" mm"
+            onChange={setPrintMm}
+          />
+          {!is3d && (
+            <p className="font-mono text-[11px] text-muted-foreground">
+              Cambia a la vista 3D para verlo en relieve.
+            </p>
+          )}
+        </Section>
 
         <div
-          className={`flex items-start gap-2 rounded-lg border p-3 ${
-            scan.level === "good"
+          className={`my-4 flex items-start gap-2 rounded-lg border p-3 ${
+            status.level === "good"
               ? "border-accent/40 bg-accent/10"
-              : scan.level === "warn"
-                ? "border-border bg-muted"
-                : "border-destructive/50 bg-destructive/10"
+              : status.level === "bad"
+                ? "border-destructive/50 bg-destructive/10"
+                : "border-border bg-muted"
           }`}
+          aria-live="polite"
         >
-          {scan.level === "good" ? (
+          {status.level === "good" ? (
             <CheckIcon className="mt-0.5 size-4 shrink-0 text-accent" />
           ) : (
             <AlertIcon
               className={`mt-0.5 size-4 shrink-0 ${
-                scan.level === "bad" ? "text-destructive" : "text-muted-foreground"
+                status.level === "bad"
+                  ? "text-destructive"
+                  : "text-muted-foreground"
               }`}
             />
           )}
           <div className="space-y-0.5">
-            <p className="text-sm text-card-foreground">{scan.message}</p>
+            <p className="text-sm text-card-foreground">{status.message}</p>
             <p className="font-mono text-xs text-muted-foreground">
               contraste {scan.ratio.toFixed(1)}:1
             </p>
@@ -365,7 +764,7 @@ export default function QrStudio() {
                   type="button"
                   role="radio"
                   aria-checked={active}
-                  onClick={() => setMode(id)}
+                  onClick={() => switchMode(id)}
                   className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-md px-4 font-mono text-sm transition-colors duration-200 ${
                     active
                       ? "bg-accent text-on-accent"
@@ -382,7 +781,7 @@ export default function QrStudio() {
           <p className="hidden items-center gap-2 font-mono text-xs text-muted-foreground sm:flex">
             <OrbitIcon
               className={`size-4 transition-opacity duration-300 ${
-                is3d ? "opacity-100 text-accent" : "opacity-40"
+                is3d ? "text-accent opacity-100" : "opacity-40"
               }`}
             />
             {is3d ? "Arrastra para orbitar" : "Pulsa 3D para extruir"}
@@ -390,19 +789,33 @@ export default function QrStudio() {
         </header>
 
         <div className="relative flex-1">
-          {matrix && <Viewport ref={viewportRef} matrix={matrix} design={design} mode={mode} />}
+          {matrix && (
+            <Viewport
+              ref={viewportRef}
+              matrix={matrix}
+              design={design}
+              mode={mode}
+            />
+          )}
         </div>
 
         <footer className="flex flex-wrap items-center gap-2 border-t border-border p-4">
           {is3d ? (
-            <button
-              type="button"
-              onClick={handleStl}
-              className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg bg-accent px-5 font-mono text-sm font-semibold text-on-accent transition-all duration-200 hover:-translate-y-px hover:opacity-90"
-            >
-              <DownloadIcon className="size-4" />
-              STL para imprimir
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={handleStl}
+                className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg bg-accent px-5 font-mono text-sm font-semibold text-on-accent transition-all duration-200 hover:-translate-y-px hover:opacity-90"
+              >
+                <DownloadIcon className="size-4" />
+                STL para imprimir
+              </button>
+              {design.logo && (
+                <span className="font-mono text-[11px] text-muted-foreground">
+                  el logo no va en la malla
+                </span>
+              )}
+            </>
           ) : (
             <>
               <button
@@ -424,7 +837,7 @@ export default function QrStudio() {
             </>
           )}
           <span className="ml-auto font-mono text-xs text-muted-foreground">
-            {matrix ? `${matrix.size}×${matrix.size} módulos` : ""}
+            {matrix ? `${matrix.size}×${matrix.size}` : ""}
             {is3d && ` · ${printMm}mm`}
           </span>
         </footer>

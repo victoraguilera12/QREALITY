@@ -46,15 +46,33 @@ const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(
 
   useEffect(() => {
     sceneRef.current?.build(matrix, design);
-  }, [matrix, design.shape]);
+  }, [
+    matrix,
+    design.body,
+    design.eyeFrame,
+    design.eyeBall,
+    design.profile,
+    design.logo?.src,
+    design.logo?.size,
+    design.logo?.clearSpace,
+  ]);
 
   useEffect(() => {
     sceneRef.current?.setDepth(design.depth, design.plate);
   }, [design.depth, design.plate]);
 
   useEffect(() => {
-    sceneRef.current?.setColors(design.fg, design.bg);
-  }, [design.fg, design.bg]);
+    sceneRef.current?.applyColors(design);
+  }, [
+    design.colorMode,
+    design.fg,
+    design.bg,
+    design.gradientTo,
+    design.gradientType,
+    design.gradientAngle,
+    design.eyeFrameColor,
+    design.eyeBallColor,
+  ]);
 
   useEffect(() => {
     const scene = sceneRef.current;

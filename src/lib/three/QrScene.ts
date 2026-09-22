@@ -1,8 +1,24 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { QUIET_ZONE, type QrDesign } from "../qr/design";
+import {
+  QUIET_ZONE,
+  eyeBallColorOf,
+  eyeFrameColorOf,
+  inLogoZone,
+  type QrDesign,
+} from "../qr/design";
 import { finderOrigins, inFinder, isDark, type QrMatrix } from "../qr/matrix";
-import { finderShapes, moduleGeometry } from "./shapes";
+import {
+  BODY_OUTLINES,
+  EYE_BALL_OUTLINES,
+  EYE_FRAME_OUTLINES,
+} from "../qr/outline";
+import {
+  frameGeometry,
+  profiledGeometry,
+  PROFILES,
+  PROFILE_SEGMENTS,
+} from "./shapes";
 
 const FOV = 24;
 const TILT_MAX = THREE.MathUtils.degToRad(54);
@@ -10,10 +26,19 @@ const AZIM_MAX = THREE.MathUtils.degToRad(26);
 /** Fraction of the timeline consumed by the centre-out stagger. */
 const STAGGER_SPREAD = 0.45;
 const FLAT_EPSILON = 0.012;
+const LOGO_LIFT = 0.03;
 
 const prefersReducedMotion = () =>
   typeof window !== "undefined" &&
   window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function standard(color: string) {
+  return new THREE.MeshStandardMaterial({
+    color: new THREE.Color(color),
+    roughness: 0.55,
+    metalness: 0.04,
+  });
+}
 
 export class QrScene {
   private renderer: THREE.WebGLRenderer;
@@ -22,12 +47,13 @@ export class QrScene {
   private group = new THREE.Group();
 
   private moduleMesh: THREE.InstancedMesh | null = null;
-  private finderMesh: THREE.Mesh | null = null;
+  private frameMesh: THREE.Mesh | null = null;
+  private ballMesh: THREE.Mesh | null = null;
   private plate: THREE.Mesh | null = null;
+  private logoMesh: THREE.Mesh | null = null;
 
   private delays = new Float32Array(0);
   private origins = new Float32Array(0);
-  private finderDelay = 0;
   private span = 1;
 
   private progress = 0;
@@ -77,6 +103,9 @@ export class QrScene {
     this.span = matrix.size + QUIET_ZONE * 2;
 
     const half = matrix.size / 2;
+    const segments = PROFILE_SEGMENTS[design.body] ?? 4;
+    const profile = PROFILES[design.profile];
+
     const positions: number[] = [];
     const delays: number[] = [];
     const maxDist = Math.hypot(half, half);
@@ -85,6 +114,7 @@ export class QrScene {
       for (let x = 0; x < matrix.size; x++) {
         if (!isDark(matrix, x, y)) continue;
         if (inFinder(matrix.size, x, y)) continue;
+        if (inLogoZone(design, matrix.size, x, y)) continue;
         const wx = x + 0.5 - half;
         const wy = half - y - 0.5;
         positions.push(wx, wy);
@@ -95,44 +125,61 @@ export class QrScene {
     this.origins = new Float32Array(positions);
     this.delays = new Float32Array(delays);
 
-    const material = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(design.fg),
-      roughness: 0.55,
-      metalness: 0.04,
-    });
-
-    const count = delays.length;
-    if (count > 0) {
+    if (delays.length > 0) {
       this.moduleMesh = new THREE.InstancedMesh(
-        moduleGeometry(design.shape),
-        material,
-        count,
+        profiledGeometry(BODY_OUTLINES[design.body], profile, segments),
+        new THREE.MeshStandardMaterial({
+          color: 0xffffff,
+          roughness: 0.55,
+          metalness: 0.04,
+        }),
+        delays.length,
       );
       this.moduleMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       this.group.add(this.moduleMesh);
     }
 
-    const finderGeos: THREE.BufferGeometry[] = [];
+    const frameSpec = EYE_FRAME_OUTLINES[design.eyeFrame];
+    const frameSegments = PROFILE_SEGMENTS[design.eyeFrame] ?? 5;
+    const ballSegments = PROFILE_SEGMENTS[design.eyeBall] ?? 5;
+    const frames: THREE.BufferGeometry[] = [];
+    const balls: THREE.BufferGeometry[] = [];
+
     for (const [fx, fy] of finderOrigins(matrix.size)) {
-      for (const shape of finderShapes(design.shape)) {
-        const geo = new THREE.ExtrudeGeometry(shape, {
-          depth: 1,
-          bevelEnabled: false,
-          // Finders are 7x7 modules, so their curvature reads at full size.
-          curveSegments: design.shape === "dot" ? 28 : 10,
-        });
-        geo.translate(fx - half, half - fy - 7, 0);
-        finderGeos.push(geo);
-      }
+      const cx = fx + 3.5 - half;
+      const cy = half - fy - 3.5;
+      const f = frameGeometry(frameSpec.outer, frameSpec.inner, frameSegments);
+      f.translate(cx, cy, 0);
+      frames.push(f);
+      const b = profiledGeometry(
+        EYE_BALL_OUTLINES[design.eyeBall],
+        profile,
+        ballSegments,
+      );
+      b.scale(3, 3, 1);
+      b.translate(cx, cy, 0);
+      balls.push(b);
     }
-    const merged = mergeGeometries(finderGeos, false);
-    for (const g of finderGeos) g.dispose();
-    if (merged) {
-      this.finderMesh = new THREE.Mesh(merged, material);
-      this.group.add(this.finderMesh);
+
+    const mergedFrames = mergeGeometries(frames, false);
+    for (const g of frames) g.dispose();
+    if (mergedFrames) {
+      this.frameMesh = new THREE.Mesh(
+        mergedFrames,
+        standard(eyeFrameColorOf(design)),
+      );
+      this.group.add(this.frameMesh);
     }
-    // Finders sit at the corners, so they are the last thing to rise.
-    this.finderDelay = 1;
+
+    const mergedBalls = mergeGeometries(balls, false);
+    for (const g of balls) g.dispose();
+    if (mergedBalls) {
+      this.ballMesh = new THREE.Mesh(
+        mergedBalls,
+        standard(eyeBallColorOf(design)),
+      );
+      this.group.add(this.ballMesh);
+    }
 
     const plateGeo = new THREE.BoxGeometry(this.span, this.span, 1);
     plateGeo.translate(0, 0, -0.5);
@@ -146,8 +193,67 @@ export class QrScene {
     );
     this.group.add(this.plate);
 
+    this.buildLogo(design, matrix.size);
+    this.applyColors(design);
     this.resize();
     this.setProgress(this.progress);
+  }
+
+  private buildLogo(design: QrDesign, size: number) {
+    if (!design.logo) return;
+    const w = design.logo.size * size;
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, w),
+      // Basic keeps brand colours exactly as uploaded, unlit.
+      new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false }),
+    );
+    mesh.position.z = LOGO_LIFT;
+    this.logoMesh = mesh;
+    this.group.add(mesh);
+
+    new THREE.TextureLoader().load(design.logo.src, (texture) => {
+      texture.colorSpace = THREE.SRGBColorSpace;
+      const material = mesh.material as THREE.MeshBasicMaterial;
+      material.map = texture;
+      material.needsUpdate = true;
+    });
+  }
+
+  applyColors(design: QrDesign) {
+    if (this.moduleMesh) {
+      const from = new THREE.Color(design.fg);
+      const to = new THREE.Color(design.gradientTo);
+      const colour = new THREE.Color();
+      const rad = (design.gradientAngle * Math.PI) / 180;
+      const dx = Math.cos(rad);
+      const dy = -Math.sin(rad);
+      const radius = this.span / 2;
+
+      for (let i = 0; i < this.delays.length; i++) {
+        const x = this.origins[i * 2];
+        const y = this.origins[i * 2 + 1];
+        let t = 0;
+        if (design.colorMode === "gradient") {
+          t =
+            design.gradientType === "radial"
+              ? Math.hypot(x, y) / radius
+              : 0.5 + (x * dx + y * dy) / this.span;
+        }
+        colour.copy(from).lerp(to, THREE.MathUtils.clamp(t, 0, 1));
+        this.moduleMesh.setColorAt(i, colour);
+      }
+      if (this.moduleMesh.instanceColor)
+        this.moduleMesh.instanceColor.needsUpdate = true;
+    }
+    (this.frameMesh?.material as THREE.MeshStandardMaterial | undefined)?.color.set(
+      eyeFrameColorOf(design),
+    );
+    (this.ballMesh?.material as THREE.MeshStandardMaterial | undefined)?.color.set(
+      eyeBallColorOf(design),
+    );
+    (this.plate?.material as THREE.MeshStandardMaterial | undefined)?.color.set(
+      design.bg,
+    );
   }
 
   setProgress(p: number) {
@@ -160,15 +266,6 @@ export class QrScene {
     this.depth = depth;
     this.plateDepth = plate;
     this.applyHeights();
-  }
-
-  setColors(fg: string, bg: string) {
-    const moduleMat = (this.moduleMesh?.material ??
-      this.finderMesh?.material) as THREE.MeshStandardMaterial | undefined;
-    moduleMat?.color.set(fg);
-    (this.plate?.material as THREE.MeshStandardMaterial | undefined)?.color.set(
-      bg,
-    );
   }
 
   private heightAt(delay: number) {
@@ -190,9 +287,10 @@ export class QrScene {
       }
       this.moduleMesh.instanceMatrix.needsUpdate = true;
     }
-    if (this.finderMesh) {
-      this.finderMesh.scale.z = this.heightAt(this.finderDelay);
-    }
+    // Finders sit at the corners, so they are the last thing to rise.
+    const corner = this.heightAt(1);
+    if (this.frameMesh) this.frameMesh.scale.z = corner;
+    if (this.ballMesh) this.ballMesh.scale.z = corner;
     if (this.plate) {
       this.plate.scale.z = Math.max(
         FLAT_EPSILON,
@@ -289,24 +387,31 @@ export class QrScene {
   /** Solid geometry at full extrusion, in world units, for mesh export. */
   exportGeometry(): THREE.BufferGeometry | null {
     const parts: THREE.BufferGeometry[] = [];
+    // Lofted modules carry no uv while ExtrudeGeometry does; mergeGeometries
+    // rejects a mixed attribute set, and a mesh export has no use for uv.
+    const strip = (g: THREE.BufferGeometry) => {
+      g.deleteAttribute("uv");
+      return g;
+    };
     if (this.moduleMesh) {
       const base = this.moduleMesh.geometry;
       for (let i = 0; i < this.delays.length; i++) {
-        const g = base.clone();
+        const g = strip(base.clone());
         g.scale(1, 1, this.depth);
         g.translate(this.origins[i * 2], this.origins[i * 2 + 1], 0);
         parts.push(g);
       }
     }
-    if (this.finderMesh) {
-      const g = this.finderMesh.geometry.clone();
+    for (const mesh of [this.frameMesh, this.ballMesh]) {
+      if (!mesh) continue;
+      const g = strip(mesh.geometry.clone());
       g.scale(1, 1, this.depth);
       parts.push(g);
     }
     const box = new THREE.BoxGeometry(this.span, this.span, this.plateDepth);
     box.translate(0, 0, -this.plateDepth / 2);
     // ExtrudeGeometry is non-indexed; mergeGeometries refuses a mixed set.
-    const plate = box.toNonIndexed();
+    const plate = strip(box.toNonIndexed());
     box.dispose();
     parts.push(plate);
 
@@ -316,15 +421,28 @@ export class QrScene {
   }
 
   private disposeContent() {
-    for (const child of [this.moduleMesh, this.finderMesh, this.plate]) {
+    const children = [
+      this.moduleMesh,
+      this.frameMesh,
+      this.ballMesh,
+      this.plate,
+      this.logoMesh,
+    ];
+    for (const child of children) {
       if (!child) continue;
       this.group.remove(child);
       child.geometry.dispose();
-      (child.material as THREE.Material).dispose();
+      const material = child.material as THREE.Material & {
+        map?: THREE.Texture | null;
+      };
+      material.map?.dispose();
+      material.dispose();
     }
     this.moduleMesh = null;
-    this.finderMesh = null;
+    this.frameMesh = null;
+    this.ballMesh = null;
     this.plate = null;
+    this.logoMesh = null;
   }
 
   dispose() {
