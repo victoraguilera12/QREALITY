@@ -23,5 +23,7 @@ pnpm-debug.log*
 # jetbrains setting folder
 .idea/
 
-# vendored third-party skill (reinstall from nextlevelbuilder/ui-ux-pro-max-skill)
-.claude/skills/
+# python artifacts from the skill scripts
+__pycache__/
+*.pyc
+.coverage
