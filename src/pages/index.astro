@@ -1,0 +1,68 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import QrStudio from "../components/studio/QrStudio";
+
+const features = [
+  {
+    title: "Una sola pieza, dos dimensiones",
+    body: "El QR plano y el modelo en relieve son el mismo objeto. No hay render duplicado: la vista 2D es la escena 3D vista desde arriba, por eso la transición es continua.",
+  },
+  {
+    title: "Escaneable por construcción",
+    body: "El contraste se valida en vivo contra el umbral que necesitan los lectores, y el nivel de corrección de errores es tuyo para ajustar.",
+  },
+  {
+    title: "Listo para la impresora",
+    body: "Exporta STL en milímetros reales, con relieve y grosor de placa configurables. Lo que ves orbitando es exactamente la malla que se descarga.",
+  },
+];
+---
+
+<BaseLayout
+  title="QR Studio — del link al objeto imprimible"
+  description="Genera códigos QR personalizables y conviértelos en modelos 3D listos para imprimir, con una transición continua entre el plano y el relieve."
+>
+  <div class="relative">
+    <div class="grid-backdrop pointer-events-none absolute inset-x-0 top-0 h-[520px]"></div>
+
+    <main class="relative mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 lg:px-8 lg:py-12">
+      <header class="mx-auto max-w-3xl text-center">
+        <p class="font-mono text-xs tracking-[0.2em] text-accent uppercase">
+          QR Studio
+        </p>
+        <h1 class="mt-3 font-mono text-4xl leading-tight font-bold text-balance sm:text-5xl">
+          Del link al objeto que puedes sostener
+        </h1>
+        <p class="mx-auto mt-4 max-w-xl text-muted-foreground text-pretty">
+          Pega una URL, dale tu color y tu forma, y mira cómo el código se
+          levanta del plano hasta volverse un modelo listo para imprimir.
+        </p>
+      </header>
+
+      <div class="mt-10">
+        <QrStudio client:load />
+      </div>
+
+      <section class="mt-20 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-3">
+        {
+          features.map((f) => (
+            <article class="bg-card p-6">
+              <h2 class="font-mono text-base font-semibold text-card-foreground">
+                {f.title}
+              </h2>
+              <p class="mt-3 text-sm leading-relaxed text-muted-foreground">
+                {f.body}
+              </p>
+            </article>
+          ))
+        }
+      </section>
+
+      <footer class="mt-16 border-t border-border pt-8 text-center">
+        <p class="font-mono text-xs text-muted-foreground">
+          Todo se genera en tu navegador. Ningún link sale de este dispositivo.
+        </p>
+      </footer>
+    </main>
+  </div>
+</BaseLayout>
