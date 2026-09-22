@@ -13,12 +13,25 @@ import {
   EYE_BALL_OUTLINES,
   EYE_FRAME_OUTLINES,
 } from "../qr/outline";
+import { frameGeometry, profiledGeometry, PROFILE_SEGMENTS } from "./shapes";
 import {
-  frameGeometry,
-  profiledGeometry,
-  PROFILES,
-  PROFILE_SEGMENTS,
-} from "./shapes";
+  PRISM,
+  SOLIDS,
+  solidFootprint,
+  solidHeight,
+  type Solid3D,
+} from "./solids";
+
+/** Body geometry lofted downward from the code's face, unit height. */
+function bodyGeometry(solid: Solid3D, span: number) {
+  const spec = SOLIDS[solid];
+  const geo = profiledGeometry(spec.footprint, spec.profile, spec.segments);
+  // Turn the loft over so it hangs below z=0; rotating keeps the winding.
+  geo.rotateX(Math.PI);
+  const size = solidFootprint(solid, span);
+  geo.scale(size, size, 1);
+  return geo;
+}
 
 const FOV = 24;
 const TILT_MAX = THREE.MathUtils.degToRad(54);
@@ -49,16 +62,20 @@ export class QrScene {
   private moduleMesh: THREE.InstancedMesh | null = null;
   private frameMesh: THREE.Mesh | null = null;
   private ballMesh: THREE.Mesh | null = null;
-  private plate: THREE.Mesh | null = null;
+  private body: THREE.Mesh | null = null;
   private logoMesh: THREE.Mesh | null = null;
 
   private delays = new Float32Array(0);
   private origins = new Float32Array(0);
   private span = 1;
+  private solid: Solid3D = "slab";
+  private solidSize = 1;
+  /** Footprint diagonal as a multiple of its width. */
+  private footDiagonal = Math.SQRT2;
 
   private progress = 0;
   private depth = 1.6;
-  private plateDepth = 0.8;
+  private bodyHeight = 0.8;
 
   private azimuthDrift = 0;
   private userAzimuth = 0;
@@ -99,12 +116,16 @@ export class QrScene {
   build(matrix: QrMatrix, design: QrDesign) {
     this.disposeContent();
     this.depth = design.depth;
-    this.plateDepth = design.plate;
+    this.bodyHeight = design.bodyHeight;
     this.span = matrix.size + QUIET_ZONE * 2;
+    this.solid = design.solid;
+    this.solidSize = solidFootprint(design.solid, this.span);
+    this.footDiagonal =
+      SOLIDS[design.solid].footprint.kind === "rect" ? Math.SQRT2 : 1;
 
     const half = matrix.size / 2;
     const segments = PROFILE_SEGMENTS[design.body] ?? 4;
-    const profile = PROFILES[design.profile];
+    const profile = PRISM;
 
     const positions: number[] = [];
     const delays: number[] = [];
@@ -181,17 +202,15 @@ export class QrScene {
       this.group.add(this.ballMesh);
     }
 
-    const plateGeo = new THREE.BoxGeometry(this.span, this.span, 1);
-    plateGeo.translate(0, 0, -0.5);
-    this.plate = new THREE.Mesh(
-      plateGeo,
+    this.body = new THREE.Mesh(
+      bodyGeometry(design.solid, this.span),
       new THREE.MeshStandardMaterial({
         color: new THREE.Color(design.bg),
         roughness: 0.85,
         metalness: 0,
       }),
     );
-    this.group.add(this.plate);
+    this.group.add(this.body);
 
     this.buildLogo(design, matrix.size);
     this.applyColors(design);
@@ -251,7 +270,7 @@ export class QrScene {
     (this.ballMesh?.material as THREE.MeshStandardMaterial | undefined)?.color.set(
       eyeBallColorOf(design),
     );
-    (this.plate?.material as THREE.MeshStandardMaterial | undefined)?.color.set(
+    (this.body?.material as THREE.MeshStandardMaterial | undefined)?.color.set(
       design.bg,
     );
   }
@@ -262,10 +281,11 @@ export class QrScene {
     this.updateCamera();
   }
 
-  setDepth(depth: number, plate: number) {
+  setDepth(depth: number, bodyHeight: number) {
     this.depth = depth;
-    this.plateDepth = plate;
+    this.bodyHeight = bodyHeight;
     this.applyHeights();
+    this.updateCamera();
   }
 
   private heightAt(delay: number) {
@@ -291,21 +311,31 @@ export class QrScene {
     const corner = this.heightAt(1);
     if (this.frameMesh) this.frameMesh.scale.z = corner;
     if (this.ballMesh) this.ballMesh.scale.z = corner;
-    if (this.plate) {
-      this.plate.scale.z = Math.max(
+    if (this.body) {
+      this.body.scale.z = Math.max(
         FLAT_EPSILON,
-        this.progress * this.plateDepth,
+        this.progress * this.bodyHeight,
       );
     }
   }
 
-  private fitDistance() {
+  /** Vertical span the object currently occupies, and its mid-point. */
+  private extent() {
+    const top = this.heightAt(0);
+    const bottom = -this.progress * this.bodyHeight;
+    return { top, bottom, centre: (top + bottom) / 2 };
+  }
+
+  private fitDistance(verticalExtent: number) {
     const aspect = this.camera.aspect;
     const halfV = Math.tan(THREE.MathUtils.degToRad(FOV) / 2);
     const halfH = halfV * aspect;
-    // Tilting swings the plate's diagonal into frame, so pull back as it rises.
-    const margin = 1.12 + 0.22 * this.progress;
-    return (this.span / 2 / Math.min(halfV, halfH)) * margin;
+    // Fit the object's bounding sphere: a tall body needs far more room than
+    // a flat plate, and a round footprint needs less than a square one.
+    const radius =
+      0.5 *
+      Math.hypot(this.solidSize * this.footDiagonal, verticalExtent * 1.05);
+    return (radius / Math.min(halfV, halfH)) * 1.06;
   }
 
   private updateCamera() {
@@ -316,15 +346,16 @@ export class QrScene {
     );
     const azim =
       (AZIM_MAX + this.userAzimuth + this.azimuthDrift) * this.progress;
-    const r = this.fitDistance();
+    const { top, bottom, centre } = this.extent();
+    const r = this.fitDistance(top - bottom);
     const sin = Math.sin(tilt);
     this.camera.position.set(
       r * sin * Math.sin(azim),
       -r * sin * Math.cos(azim),
-      r * Math.cos(tilt),
+      centre + r * Math.cos(tilt),
     );
     this.camera.up.set(0, 1, 0);
-    this.camera.lookAt(0, 0, 0);
+    this.camera.lookAt(0, 0, centre);
   }
 
   resize() {
@@ -408,12 +439,9 @@ export class QrScene {
       g.scale(1, 1, this.depth);
       parts.push(g);
     }
-    const box = new THREE.BoxGeometry(this.span, this.span, this.plateDepth);
-    box.translate(0, 0, -this.plateDepth / 2);
-    // ExtrudeGeometry is non-indexed; mergeGeometries refuses a mixed set.
-    const plate = strip(box.toNonIndexed());
-    box.dispose();
-    parts.push(plate);
+    const solid = strip(bodyGeometry(this.solid, this.span));
+    solid.scale(1, 1, this.bodyHeight);
+    parts.push(solid);
 
     const merged = mergeGeometries(parts, false);
     for (const p of parts) p.dispose();
@@ -425,7 +453,7 @@ export class QrScene {
       this.moduleMesh,
       this.frameMesh,
       this.ballMesh,
-      this.plate,
+      this.body,
       this.logoMesh,
     ];
     for (const child of children) {
@@ -441,7 +469,7 @@ export class QrScene {
     this.moduleMesh = null;
     this.frameMesh = null;
     this.ballMesh = null;
-    this.plate = null;
+    this.body = null;
     this.logoMesh = null;
   }
 

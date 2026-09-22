@@ -12,6 +12,9 @@ import { createMatrix, type EccLevel, type QrMatrix } from "../../lib/qr/matrix"
 import { renderSvg } from "../../lib/qr/renderSvg";
 import { scannability } from "../../lib/qr/contrast";
 import { verifyScannable } from "../../lib/qr/verify";
+import { brandTileDataUrl } from "../../lib/qr/brandLogo";
+import type { Brand } from "../../lib/qr/brands";
+import LogoGallery from "./LogoGallery";
 import {
   downloadPng,
   downloadStl,
@@ -22,8 +25,13 @@ import {
   BODY_OPTIONS,
   FRAME_OPTIONS,
   OptionGrid,
-  PROFILE_OPTIONS,
+  SOLID_OPTIONS,
 } from "./pickers";
+import {
+  solidFootprint,
+  solidHeight,
+  type Solid3D,
+} from "../../lib/three/solids";
 import {
   AlertIcon,
   CheckIcon,
@@ -301,6 +309,10 @@ export default function QrStudio() {
     if (next === "3d") setOpen("model");
   };
 
+  /** Each body has its own natural proportions, so retune the height with it. */
+  const pickSolid = (next: Solid3D) =>
+    setDesign((d) => ({ ...d, solid: next, bodyHeight: solidHeight(next, span) }));
+
   const onLogoFile = (file: File | undefined) => {
     if (!file) return;
     if (!LOGO_TYPES.includes(file.type)) {
@@ -317,15 +329,39 @@ export default function QrStudio() {
       setDesign((d) => ({
         ...d,
         ecc: "H",
-        logo: { src: String(reader.result), size: 0.22, clearSpace: true },
+        logo: {
+          src: String(reader.result),
+          size: d.logo?.size ?? 0.22,
+          clearSpace: d.logo?.clearSpace ?? true,
+        },
       }));
     };
     reader.readAsDataURL(file);
   };
 
+  const pickBrand = (brand: Brand) =>
+    setDesign((d) => ({
+      ...d,
+      ecc: "H",
+      logo: {
+        src: brandTileDataUrl(brand),
+        brand: brand.slug,
+        size: d.logo?.size ?? 0.22,
+        clearSpace: d.logo?.clearSpace ?? true,
+      },
+    }));
+
   const handleStl = () => {
     const geometry = viewportRef.current?.exportGeometry();
-    if (geometry) downloadStl(geometry, span, printMm, "qr-studio.stl");
+    // Round bodies overshoot the code's span, so scale by what is actually
+    // the widest part or the print would come out oversized.
+    if (geometry)
+      downloadStl(
+        geometry,
+        solidFootprint(design.solid, span),
+        printMm,
+        "qr-studio.stl",
+      );
   };
 
   return (
@@ -556,7 +592,37 @@ export default function QrStudio() {
             className="hidden"
             onChange={(e) => onLogoFile(e.target.files?.[0])}
           />
-          {design.logo ? (
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={!design.logo}
+              onClick={() => setDesign((d) => ({ ...d, logo: null }))}
+              className={`flex min-h-11 cursor-pointer items-center justify-center rounded-lg border font-mono text-xs transition-colors duration-200 ${
+                design.logo
+                  ? "border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground"
+                  : "border-accent bg-accent/10 text-accent"
+              }`}
+            >
+              Sin logo
+            </button>
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className={`flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border font-mono text-xs transition-colors duration-200 ${
+                design.logo && !design.logo.brand
+                  ? "border-accent bg-accent/10 text-accent"
+                  : "border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <ImageIcon className="size-4" />
+              Usa imagen
+            </button>
+          </div>
+
+          <LogoGallery selected={design.logo?.brand} onPick={pickBrand} />
+
+          {design.logo && (
             <div className="space-y-4">
               <div className="flex items-center gap-3 rounded-lg border border-border bg-background p-2">
                 <img
@@ -607,20 +673,6 @@ export default function QrStudio() {
                 tapado.
               </p>
             </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              className="flex w-full cursor-pointer flex-col items-center gap-2 rounded-lg border border-dashed border-border px-4 py-8 transition-colors duration-200 hover:border-accent hover:text-accent"
-            >
-              <ImageIcon className="size-6 text-muted-foreground" />
-              <span className="font-mono text-xs text-muted-foreground">
-                Sube tu logo o marca
-              </span>
-              <span className="font-mono text-[10px] text-muted-foreground/70">
-                PNG, JPG o WebP · máx. 1.5 MB
-              </span>
-            </button>
           )}
           {logoError && (
             <p className="font-mono text-xs text-destructive">{logoError}</p>
@@ -667,21 +719,21 @@ export default function QrStudio() {
         <Section
           id="model"
           title="Modelo 3D"
-          hint={PROFILE_OPTIONS.find((p) => p.id === design.profile)?.label}
+          hint={SOLID_OPTIONS.find((s) => s.id === design.solid)?.label}
           open={open}
           onToggle={toggleSection}
         >
           <div className="space-y-2">
-            <Label>Figura del módulo</Label>
+            <Label>Figura del objeto</Label>
             <OptionGrid
-              options={PROFILE_OPTIONS}
-              value={design.profile}
-              onChange={(v) => set("profile", v)}
-              label="Figura 3D del módulo"
+              options={SOLID_OPTIONS}
+              value={design.solid}
+              onChange={pickSolid}
+              label="Figura del objeto"
             />
           </div>
           <Slider
-            label="Relieve"
+            label="Relieve de los módulos"
             value={design.depth}
             min={0.4}
             max={4}
@@ -690,13 +742,13 @@ export default function QrStudio() {
             onChange={(v) => set("depth", v)}
           />
           <Slider
-            label="Grosor de placa"
-            value={design.plate}
+            label="Altura del cuerpo"
+            value={design.bodyHeight}
             min={0.3}
-            max={3}
+            max={40}
             step={0.1}
             suffix=" u"
-            onChange={(v) => set("plate", v)}
+            onChange={(v) => set("bodyHeight", v)}
           />
           <Slider
             label="Tamaño de impresión"

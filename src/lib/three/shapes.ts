@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import type { Profile3D } from "../qr/design";
 import type { Outline } from "../qr/outline";
 
 const HALF_PI = Math.PI / 2;
@@ -59,42 +58,6 @@ export function outlineToShape(
 
 /** [height fraction, footprint scale] samples from base to tip. */
 export type Profile = Array<[number, number]>;
-
-function dome(steps = 7): Profile {
-  return Array.from({ length: steps + 1 }, (_, i) => {
-    const t = (i / steps) * HALF_PI;
-    return [Math.sin(t), Math.cos(t)] as [number, number];
-  });
-}
-
-export const PROFILES: Record<Profile3D, Profile> = {
-  prism: [
-    [0, 1],
-    [1, 1],
-  ],
-  bevel: [
-    [0, 1],
-    [0.72, 1],
-    [1, 0.62],
-  ],
-  frustum: [
-    [0, 1],
-    [1, 0.45],
-  ],
-  pyramid: [
-    [0, 1],
-    [1, 0],
-  ],
-  dome: dome(),
-  ziggurat: [
-    [0, 1],
-    [0.34, 1],
-    [0.34, 0.72],
-    [0.67, 0.72],
-    [0.67, 0.44],
-    [1, 0.44],
-  ],
-};
 
 export const PROFILE_SEGMENTS: Record<string, number> = {
   square: 1,

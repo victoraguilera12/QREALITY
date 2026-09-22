@@ -1,21 +1,15 @@
 import type { EccLevel } from "./matrix";
 import type { BodyShape, EyeBallShape, EyeFrameShape } from "./outline";
+import type { Solid3D } from "../three/solids";
 
 export type ColorMode = "single" | "gradient";
 export type GradientType = "linear" | "radial";
 
-/** Vertical profile of an extruded module. */
-export type Profile3D =
-  | "prism"
-  | "bevel"
-  | "frustum"
-  | "pyramid"
-  | "dome"
-  | "ziggurat";
-
 export type Logo = {
-  /** Data URL of the uploaded image. */
+  /** Data URL of the uploaded image, or of a rendered brand tile. */
   src: string;
+  /** Slug when the logo came from the gallery, so it can stay highlighted. */
+  brand?: string;
   /** Width as a fraction of the code, excluding the quiet zone. */
   size: number;
   /** Clear the modules underneath so the logo never fights the pattern. */
@@ -43,11 +37,12 @@ export type QrDesign = {
 
   logo: Logo | null;
 
-  profile: Profile3D;
-  /** Extrusion height, in modules-as-units. */
+  /** Geometric body the code sits on. */
+  solid: Solid3D;
+  /** Module extrusion height, in modules-as-units. */
   depth: number;
-  /** Plate thickness, in modules-as-units. */
-  plate: number;
+  /** Height of the body below the code, in modules-as-units. */
+  bodyHeight: number;
 };
 
 export const QUIET_ZONE = 4;
@@ -67,9 +62,9 @@ export const DEFAULT_DESIGN: QrDesign = {
   eyeFrameColor: null,
   eyeBallColor: null,
   logo: null,
-  profile: "prism",
+  solid: "slab",
   depth: 1.6,
-  plate: 0.8,
+  bodyHeight: 0.8,
 };
 
 export type Preset = { name: string; fg: string; bg: string };

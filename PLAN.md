@@ -23,13 +23,22 @@ así las dos vistas no pueden divergir.
 **Colores.** Sólido o degradado (lineal con ángulo, o radial), fondo, y color propio
 opcional para marco y pupila. En 3D el degradado se aplica por instancia.
 
-**Logo.** Subida de PNG/JPG/WebP (máx. 1.5 MB), tamaño ajustable, despeje opcional de
-los módulos de debajo, y subida automática a ECC H. Se renderiza en el SVG y como
-plano texturizado en la escena 3D.
+**Logo.** Galería de 24 marcas (WhatsApp, Facebook, X, YouTube…) más subida propia de
+PNG/JPG/WebP (máx. 1.5 MB). Tamaño ajustable, despeje opcional de los módulos de
+debajo, y subida automática a ECC H. Se renderiza en el SVG y como plano texturizado
+en la escena 3D.
 
-**Modelo 3D.** Seis perfiles de extrusión — prisma, bisel, tronco, pirámide, cúpula,
-zigurat — generados por un lofting genérico sobre el mismo contorno 2D. Relieve,
-grosor de placa y tamaño de impresión ajustables.
+Los glifos vienen de `simple-icons` (CC0) y se generan a `src/lib/qr/brands.ts` con
+`node scripts/gen-brands.mjs`; `simple-icons` es sólo dependencia de desarrollo. Al
+elegir una marca se rasteriza su baldosa a PNG, así una marca de la galería recorre
+exactamente el mismo camino que una imagen subida. LinkedIn no está porque
+simple-icons lo retiró a petición de la marca.
+
+**Modelo 3D.** La figura aplica al **objeto entero**, no a cada módulo: placa, cubo,
+pirámide, cilindro, hexágono o cúpula. El cuerpo se lofta hacia abajo desde la cara
+del código; los módulos son siempre prismas sobre él. Los cuerpos redondos y
+hexagonales ensanchan más allá del span para no recortar la zona de silencio, y el
+escalado a milímetros usa esa anchura real, no la del código.
 
 **Transición 2D→3D.** La vista 2D *es* la escena 3D vista desde arriba con los módulos
 a altura cero. Al pulsar 3D, una sola interpolación de 1.1s los sube con stagger desde

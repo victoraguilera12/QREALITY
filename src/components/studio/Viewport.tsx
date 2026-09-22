@@ -51,15 +51,15 @@ const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(
     design.body,
     design.eyeFrame,
     design.eyeBall,
-    design.profile,
+    design.solid,
     design.logo?.src,
     design.logo?.size,
     design.logo?.clearSpace,
   ]);
 
   useEffect(() => {
-    sceneRef.current?.setDepth(design.depth, design.plate);
-  }, [design.depth, design.plate]);
+    sceneRef.current?.setDepth(design.depth, design.bodyHeight);
+  }, [design.depth, design.bodyHeight]);
 
   useEffect(() => {
     sceneRef.current?.applyColors(design);

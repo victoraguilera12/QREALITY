@@ -41,17 +41,17 @@ export async function downloadPng(svg: string, filename: string, size = 1024) {
 }
 
 /**
- * Scales the scene's module-unit geometry so the printed plate matches
- * `plateMm` across, then writes binary STL (millimetres, Z up).
+ * Scales the scene's module-unit geometry so the object's widest dimension
+ * measures `widthMm`, then writes binary STL (millimetres, Z up).
  */
 export function downloadStl(
   geometry: THREE.BufferGeometry,
-  spanModules: number,
-  plateMm: number,
+  widthUnits: number,
+  widthMm: number,
   filename: string,
 ) {
   const mesh = new THREE.Mesh(geometry);
-  mesh.scale.setScalar(plateMm / spanModules);
+  mesh.scale.setScalar(widthMm / widthUnits);
   mesh.updateMatrixWorld(true);
   const data = new STLExporter().parse(mesh, { binary: true });
   save(new Blob([data as unknown as ArrayBuffer], { type: "model/stl" }), filename);

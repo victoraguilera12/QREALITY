@@ -8,8 +8,7 @@ import {
   type EyeBallShape,
   type EyeFrameShape,
 } from "../../lib/qr/outline";
-import { PROFILES } from "../../lib/three/shapes";
-import type { Profile3D } from "../../lib/qr/design";
+import { SOLIDS, type Solid3D } from "../../lib/three/solids";
 
 export function OptionGrid<T extends string>({
   options,
@@ -105,14 +104,44 @@ function BallArt({ shape }: { shape: EyeBallShape }) {
   );
 }
 
-/** Side silhouette straight from the extrusion profile data. */
-function ProfileArt({ profile }: { profile: Profile3D }) {
-  const steps = PROFILES[profile];
-  const left = steps.map(([h, s]) => `${0.5 - s / 2} ${1 - h}`);
-  const right = [...steps].reverse().map(([h, s]) => `${0.5 + s / 2} ${1 - h}`);
+/** Top face plus side silhouette, both straight from the solid's own spec. */
+function SolidArt({ solid }: { solid: Solid3D }) {
+  const spec = SOLIDS[solid];
+  const W = 18;
+  const cx = 12;
+  const topY = 6;
+  const ry = W * 0.16;
+  const ratio = spec.height(33) / 33;
+  const drawH = Math.min(13, Math.max(3, ratio * 16));
+
+  const left = spec.profile.map(
+    ([t, s]) => `${cx - (W / 2) * s} ${topY + drawH * t}`,
+  );
+  const right = [...spec.profile]
+    .reverse()
+    .map(([t, s]) => `${cx + (W / 2) * s} ${topY + drawH * t}`);
+
+  const face =
+    spec.footprint.kind === "circle" ? (
+      <ellipse cx={cx} cy={topY} rx={W / 2} ry={ry} />
+    ) : spec.footprint.kind === "poly" ? (
+      <polygon
+        points={spec.footprint.pts
+          .map(([x, y]) => `${cx + x * W},${topY + y * ry * 2}`)
+          .join(" ")}
+      />
+    ) : (
+      <rect x={cx - W / 2} y={topY - ry} width={W} height={ry * 2} />
+    );
+
   return (
-    <svg viewBox="0 0 1 1" className="size-7" aria-hidden="true">
-      <path d={`M${left.join("L")}L${right.join("L")}Z`} fill="currentColor" />
+    <svg viewBox="0 0 24 24" className="size-7" aria-hidden="true">
+      <path
+        d={`M${left.join("L")}L${right.join("L")}Z`}
+        fill="currentColor"
+        opacity="0.5"
+      />
+      <g fill="currentColor">{face}</g>
     </svg>
   );
 }
@@ -166,28 +195,21 @@ export const BALL_OPTIONS: Array<{
   art: <BallArt shape={id} />,
 }));
 
-export const PROFILE_OPTIONS: Array<{
-  id: Profile3D;
+export const SOLID_OPTIONS: Array<{
+  id: Solid3D;
   label: string;
   art: ReactNode;
 }> = (
-  [
-    "prism",
-    "bevel",
-    "frustum",
-    "pyramid",
-    "dome",
-    "ziggurat",
-  ] as Profile3D[]
+  ["slab", "cube", "pyramid", "cylinder", "hexagon", "dome"] as Solid3D[]
 ).map((id) => ({
   id,
   label: {
-    prism: "Prisma",
-    bevel: "Bisel",
-    frustum: "Tronco",
+    slab: "Placa",
+    cube: "Cubo",
     pyramid: "Pirámide",
+    cylinder: "Cilindro",
+    hexagon: "Hexágono",
     dome: "Cúpula",
-    ziggurat: "Zigurat",
   }[id],
-  art: <ProfileArt profile={id} />,
+  art: <SolidArt solid={id} />,
 }));
