@@ -28,6 +28,11 @@ PNG/JPG/WebP (máx. 1.5 MB). Tamaño ajustable, despeje opcional de los módulos
 debajo, y subida automática a ECC H. Se renderiza en el SVG y como plano texturizado
 en la escena 3D.
 
+Al aplicar un logo, la app busca el mayor tamaño que todavía decodifica y ajusta solo,
+avisando si tuvo que reducirlo. La capacidad de corrección no predice esto por sí sola:
+el logo es una mancha sólida en el centro y estorba mucho más de lo que sugiere su área,
+así que la única respuesta fiable es decodificar candidatos.
+
 Los glifos vienen de `simple-icons` (CC0) y se generan a `src/lib/qr/brands.ts` con
 `node scripts/gen-brands.mjs`; `simple-icons` es sólo dependencia de desarrollo. Al
 elegir una marca se rasteriza su baldosa a PNG, así una marca de la galería recorre

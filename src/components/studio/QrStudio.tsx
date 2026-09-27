@@ -12,6 +12,7 @@ import { createMatrix, type EccLevel, type QrMatrix } from "../../lib/qr/matrix"
 import { renderSvg } from "../../lib/qr/renderSvg";
 import { scannability } from "../../lib/qr/contrast";
 import { verifyScannable } from "../../lib/qr/verify";
+import { fitLogoSize } from "../../lib/qr/fitLogo";
 import { brandTileDataUrl } from "../../lib/qr/brandLogo";
 import type { Brand } from "../../lib/qr/brands";
 import LogoGallery from "./LogoGallery";
@@ -230,6 +231,7 @@ export default function QrStudio() {
   const [printMm, setPrintMm] = useState(60);
   const [open, setOpen] = useState<SectionId | null>("content");
   const [logoError, setLogoError] = useState<string | null>(null);
+  const [logoNote, setLogoNote] = useState<string | null>(null);
   const viewportRef = useRef<ViewportHandle>(null);
   const lastMatrix = useRef<QrMatrix | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -288,8 +290,11 @@ export default function QrStudio() {
     : decoded === false
       ? {
           level: "bad",
-          message:
-            "No se pudo leer: reduce el logo o sube la corrección de errores",
+          message: design.logo
+            ? design.ecc === "H"
+              ? "No se lee: reduce el tamaño del logo"
+              : "No se lee: sube la corrección de errores o reduce el logo"
+            : "No se lee: revisa el contraste y las formas elegidas",
         }
       : scan.level === "bad"
         ? { level: "bad", message: scan.message }
@@ -326,30 +331,46 @@ export default function QrStudio() {
     const reader = new FileReader();
     reader.onload = () => {
       setLogoError(null);
-      setDesign((d) => ({
-        ...d,
-        ecc: "H",
-        logo: {
-          src: String(reader.result),
-          size: d.logo?.size ?? 0.22,
-          clearSpace: d.logo?.clearSpace ?? true,
-        },
-      }));
+      applyLogo({ src: String(reader.result) });
     };
     reader.readAsDataURL(file);
   };
 
   const pickBrand = (brand: Brand) =>
-    setDesign((d) => ({
-      ...d,
+    applyLogo({ src: brandTileDataUrl(brand), brand: brand.slug });
+
+  /**
+   * Applies a logo at the biggest size the code can still carry. Picking an
+   * icon should not hand back a broken code and ask the user to fix it.
+   */
+  const applyLogo = async (source: { src: string; brand?: string }) => {
+    const requested = design.logo?.size ?? 0.22;
+    const next: QrDesign = {
+      ...design,
       ecc: "H",
       logo: {
-        src: brandTileDataUrl(brand),
-        brand: brand.slug,
-        size: d.logo?.size ?? 0.22,
-        clearSpace: d.logo?.clearSpace ?? true,
+        ...source,
+        size: requested,
+        clearSpace: design.logo?.clearSpace ?? true,
       },
-    }));
+    };
+    setDesign(next);
+    setLogoNote(null);
+
+    const fitted = await fitLogoSize(next, requested);
+    if (fitted === null) {
+      setLogoNote("Este logo no cabe sin romper el código, ni al mínimo.");
+      return;
+    }
+    if (fitted < requested) {
+      setDesign((d) =>
+        d.logo ? { ...d, logo: { ...d.logo, size: fitted } } : d,
+      );
+      setLogoNote(
+        `Ajustado al ${Math.round(fitted * 100)}% para que siga leyéndose.`,
+      );
+    }
+  };
 
   const handleStl = () => {
     const geometry = viewportRef.current?.exportGeometry();
@@ -669,8 +690,8 @@ export default function QrStudio() {
                 }
               />
               <p className="font-mono text-[11px] leading-relaxed text-muted-foreground">
-                Con logo conviene el nivel H: recupera hasta un 30% del código
-                tapado.
+                {logoNote ??
+                  "Con logo conviene el nivel H: recupera hasta un 30% del código tapado."}
               </p>
             </div>
           )}
